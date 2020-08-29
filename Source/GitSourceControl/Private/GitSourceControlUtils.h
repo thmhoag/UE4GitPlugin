@@ -206,4 +206,6 @@ bool UpdateCachedStates(const TArray<FGitSourceControlState>& InStates);
  */
 void RemoveRedundantErrors(FGitSourceControlCommand& InCommand, const FString& InFilter);
 
+bool IsFileLFSLockable(const FString& InPathToGitBinary, const FString& InRepositoryRoot, const FString& InFile, TArray<FString>& OutErrorMessages);
+
 }

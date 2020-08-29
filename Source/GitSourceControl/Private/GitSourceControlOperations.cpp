@@ -77,24 +77,48 @@ bool FGitCheckOutWorker::Execute(FGitSourceControlCommand& InCommand)
 {
 	check(InCommand.Operation->GetName() == GetName());
 
-	if(InCommand.bUsingGitLfsLocking)
-	{
-		// lock files: execute the LFS command on relative filenames
-		InCommand.bCommandSuccessful = true;
-		const TArray<FString> RelativeFiles = GitSourceControlUtils::RelativeFilenames(InCommand.Files, InCommand.PathToRepositoryRoot);
-		for(const auto& RelativeFile : RelativeFiles)
-		{
-			TArray<FString> OneFile;
-			OneFile.Add(RelativeFile);
-			InCommand.bCommandSuccessful &= GitSourceControlUtils::RunCommand(TEXT("lfs lock"), InCommand.PathToGitBinary, InCommand.PathToRepositoryRoot, TArray<FString>(), OneFile, InCommand.InfoMessages, InCommand.ErrorMessages);
-		}
-
-		// now update the status of our files
-		GitSourceControlUtils::RunUpdateStatus(InCommand.PathToGitBinary, InCommand.PathToRepositoryRoot, InCommand.bUsingGitLfsLocking, InCommand.Files, InCommand.ErrorMessages, States);
-	}
-	else
+	if (!InCommand.bUsingGitLfsLocking)
 	{
 		InCommand.bCommandSuccessful = false;
+		return InCommand.bCommandSuccessful;
+	}
+
+	InCommand.bCommandSuccessful = true;
+	const TArray<FString> RelativeFiles = GitSourceControlUtils::RelativeFilenames(InCommand.Files, InCommand.PathToRepositoryRoot);
+	TArray<FString> LockableRelativeFiles;
+	for(const auto& RelativeFile : RelativeFiles)
+	{
+		const bool bIsLockable = GitSourceControlUtils::IsFileLFSLockable(InCommand.PathToGitBinary, InCommand.PathToRepositoryRoot, RelativeFile, InCommand.ErrorMessages);
+		if (InCommand.ErrorMessages.Num() > 0)
+		{
+			InCommand.bCommandSuccessful = false;
+			return InCommand.bCommandSuccessful;
+		}
+
+		if (bIsLockable)
+		{
+			LockableRelativeFiles.Add(RelativeFile);
+		}
+	}
+
+	InCommand.bCommandSuccessful &= GitSourceControlUtils::RunCommand(TEXT("lfs lock"), InCommand.PathToGitBinary, InCommand.PathToRepositoryRoot, TArray<FString>(), LockableRelativeFiles, InCommand.InfoMessages, InCommand.ErrorMessages);
+	if (InCommand.bCommandSuccessful)
+	{
+
+		FGitSourceControlModule& GitSourceControl = FModuleManager::GetModuleChecked<FGitSourceControlModule>("GitSourceControl");
+		FGitSourceControlProvider& Provider = GitSourceControl.GetProvider();
+		const FDateTime Now = FDateTime::Now();
+		
+		for (const auto& RelativeFile : RelativeFiles)
+		{
+			FString AbsoluteFile = FPaths::Combine(InCommand.PathToRepositoryRoot, RelativeFile);
+			FPaths::NormalizeFilename(AbsoluteFile);
+			TSharedRef<FGitSourceControlState, ESPMode::ThreadSafe> FileState = Provider.GetStateInternal(AbsoluteFile, true);
+			FileState->LockState = ELockState::Locked;
+			FileState->LockUser = GitSourceControl.AccessSettings().GetLfsUserName();
+			FileState->TimeStamp = Now;
+			States.Add(*FileState);
+		}
 	}
 
 	return InCommand.bCommandSuccessful;
