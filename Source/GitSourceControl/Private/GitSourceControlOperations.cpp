@@ -101,6 +101,12 @@ bool FGitCheckOutWorker::Execute(FGitSourceControlCommand& InCommand)
 		}
 	}
 
+	if (LockableRelativeFiles.Num() < 1)
+	{
+		InCommand.bCommandSuccessful = true;
+		return InCommand.bCommandSuccessful;
+	}
+
 	InCommand.bCommandSuccessful &= GitSourceControlUtils::RunCommand(TEXT("lfs lock"), InCommand.PathToGitBinary, InCommand.PathToRepositoryRoot, TArray<FString>(), LockableRelativeFiles, InCommand.InfoMessages, InCommand.ErrorMessages);
 	if (InCommand.bCommandSuccessful)
 	{
